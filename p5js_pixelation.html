@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixelation Animation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #2a2a2a;
+            color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #canvas-container {
+            margin: 20px 0;
+        }
+        .instructions {
+            text-align: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pixelation Animation</h1>
+    <div class="instructions">
+        <p>Click anywhere to pause/resume • Press 'R' to restart • Press 'S' to save frame</p>
+    </div>
+    <div id="canvas-container"></div>
+
+    <script>
+        let img;
+        let pixelatedImg;
+        let pixelSize = 2;
+        let cols, rows;
+        let pixels = [];
+        let animationDuration = 18000; // 18 seconds for animation (scatter + reassemble)
+        let pauseDuration = 8000; // 8 seconds assembled
+        let totalCycleDuration;
+        let startTime;
+        let animating = true; // Start animating
+        let paused = false;
+
+        class Pixel {
+            constructor(x, y, c, size) {
+                this.homeX = this.x = x;
+                this.homeY = this.y = y;
+                this.c = c;
+                this.size = size;
+                this.targetX = 0;
+                this.targetY = 0;
+            }
+
+            setTarget(tx, ty) {
+                this.targetX = tx;
+                this.targetY = ty;
+            }
+
+            update(t) {
+                // t goes from 0 to 1 during animation phase only
+                if (t < 0.5) {
+                    // First half: move from home to random position
+                    let progress = t * 2; // 0 to 1
+                    progress = this.easeInOut(progress);
+                    this.x = lerp(this.homeX, this.targetX, progress);
+                    this.y = lerp(this.homeY, this.targetY, progress);
+                } else {
+                    // Second half: move from random position back to home
+                    let progress = (t - 0.5) * 2; // 0 to 1
+                    progress = this.easeInOut(progress);
+                    this.x = lerp(this.targetX, this.homeX, progress);
+                    this.y = lerp(this.targetY, this.homeY, progress);
+                }
+            }
+
+            easeInOut(t) {
+                return t * t * (3.0 - 2.0 * t);
+            }
+
+            display() {
+                fill(this.c);
+                noStroke();
+                rect(this.x, this.y, this.size, this.size);
+            }
+        }
+
+        function preload() {
+            // You'll need to upload jc.png to your GitHub repository
+            // and update this path to match your file location
+            img = loadImage('jc.png');
+        }
+
+        function setup() {
+            let canvas = createCanvas(800, 600);
+            canvas.parent('canvas-container');
+            
+            setupPixelation();
+            totalCycleDuration = animationDuration + pauseDuration; // 18s animation + 8s pause = 26s total
+            startTime = millis();
+        }
+
+        function setupPixelation() {
+            // Create pixelated version
+            cols = floor(img.width / pixelSize);
+            rows = floor(img.height / pixelSize);
+            
+            pixels = [];
+            
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    // Sample the original image
+                    let sampleX = x * pixelSize + floor(pixelSize/2);
+                    let sampleY = y * pixelSize + floor(pixelSize/2);
+                    
+                    if (sampleX < img.width && sampleY < img.height) {
+                        let originalColor = img.get(sampleX, sampleY);
+                        
+                        // Convert to grayscale
+                        let gray = red(originalColor) * 0.299 + green(originalColor) * 0.587 + blue(originalColor) * 0.114;
+                        let bwColor = color(gray);
+                        
+                        // Create pixel object
+                        let pixelX = (width - img.width) / 2 + x * pixelSize;
+                        let pixelY = (height - img.height) / 2 + y * pixelSize;
+                        
+                        let p = new Pixel(pixelX, pixelY, bwColor, pixelSize);
+                        
+                        // Set random target position
+                        let randomX = random(width);
+                        let randomY = random(height);
+                        p.setTarget(randomX, randomY);
+                        
+                        pixels.push(p);
+                    }
+                }
+            }
+        }
+
+        function draw() {
+            background(40);
+            
+            if (paused) {
+                // Show assembled image when paused
+                for (let p of pixels) {
+                    p.x = p.homeX;
+                    p.y = p.homeY;
+                    p.display();
+                }
+                
+                fill(255);
+                textAlign(LEFT);
+                text("PAUSED - Click to resume animation", 10, 20);
+                text("Press 'R' to restart with new positions", 10, 40);
+                return;
+            }
+            
+            let currentTime = millis();
+            let elapsed = currentTime - startTime;
+            
+            if (elapsed >= totalCycleDuration) {
+                // Reset cycle and continue looping
+                startTime = currentTime;
+                elapsed = 0;
+                
+                // Set new random targets for next cycle
+                for (let p of pixels) {
+                    p.setTarget(random(width), random(height));
+                }
+            }
+            
+            if (elapsed < pauseDuration) {
+                // Initial pause phase (0-8 seconds): stay assembled first
+                for (let p of pixels) {
+                    p.x = p.homeX;
+                    p.y = p.homeY;
+                    p.display();
+                }
+                
+                // Show initial pause timer
+                fill(255);
+                textAlign(LEFT);
+                text("Assembled: " + floor(elapsed / 1000) + "s / " + floor(pauseDuration/1000) + "s", 10, 20);
+            } else {
+                // Animation phase (8-26 seconds): scatter then reassemble
+                let animationElapsed = elapsed - pauseDuration;
+                let t = animationElapsed / animationDuration;
+                
+                for (let p of pixels) {
+                    p.update(t);
+                    p.display();
+                }
+                
+                // Show animation timer
+                fill(255);
+                textAlign(LEFT);
+                text("Animating: " + floor(animationElapsed / 1000) + "s / " + floor(animationDuration/1000) + "s", 10, 20);
+            }
+            
+            text("Click anywhere to pause/resume", 10, height - 20);
+        }
+
+        function mousePressed() {
+            // Toggle pause/resume
+            paused = !paused;
+            
+            if (!paused) {
+                // Resume: reset timing to avoid jumps
+                startTime = millis();
+                
+                // Set new random targets when resuming
+                for (let p of pixels) {
+                    p.setTarget(random(width), random(height));
+                }
+            }
+        }
+
+        function keyPressed() {
+            if (key === 's' || key === 'S') {
+                // Save current frame
+                saveCanvas('pixelation-frame', 'png');
+            }
+            
+            if (key === 'r' || key === 'R') {
+                // Regenerate with new random positions
+                setupPixelation();
+                startTime = millis();
+            }
+        }
+    </script>
+</body>
+</html>
